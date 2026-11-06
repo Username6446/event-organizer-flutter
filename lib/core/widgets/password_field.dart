@@ -14,12 +14,24 @@ class PasswordField extends StatefulWidget {
     this.hint,
     this.controller,
     this.onChanged,
+    this.validator,
+    this.errorText,
+    this.enabled = true,
+    this.textInputAction,
+    this.onFieldSubmitted,
+    this.autofillHints,
   });
 
   final String? label;
   final String? hint;
   final TextEditingController? controller;
   final ValueChanged<String>? onChanged;
+  final FormFieldValidator<String>? validator;
+  final String? errorText;
+  final bool enabled;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onFieldSubmitted;
+  final Iterable<String>? autofillHints;
 
   @override
   State<PasswordField> createState() => _PasswordFieldState();
@@ -39,6 +51,12 @@ class _PasswordFieldState extends State<PasswordField> {
       hint: widget.hint,
       controller: widget.controller,
       onChanged: widget.onChanged,
+      validator: widget.validator,
+      errorText: widget.errorText,
+      enabled: widget.enabled,
+      textInputAction: widget.textInputAction,
+      onFieldSubmitted: widget.onFieldSubmitted,
+      autofillHints: widget.autofillHints,
       prefixIcon: Icons.lock,
       obscureText: _obscure,
       keyboardType: TextInputType.visiblePassword,

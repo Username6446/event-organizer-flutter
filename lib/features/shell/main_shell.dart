@@ -1,20 +1,26 @@
 import 'package:flutter/material.dart';
 
+import '../../core/services/analytics_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/utils/snackbar.dart';
-import '../auth/auth_screen.dart';
+import '../../models/app_user.dart';
+import '../auth/data/auth_failure.dart';
+import '../auth/data/auth_repository.dart';
 import '../home/home_screen.dart';
 import '../placeholder/placeholder_screen.dart';
 import '../profile/profile_screen.dart';
 
 /// Пункт навігації (іконка, активна іконка, підпис).
 class _NavItem {
-  const _NavItem(this.icon, this.selectedIcon, this.label);
+  const _NavItem(this.icon, this.selectedIcon, this.label, this.screenName);
 
   final IconData icon;
   final IconData selectedIcon;
   final String label;
+
+  /// Назва екрана для Firebase Analytics (screen_view).
+  final String screenName;
 }
 
 /// Головна оболонка після входу.
@@ -23,7 +29,17 @@ class _NavItem {
 /// ширина ≥ 600 px — бічна панель NavigationRail (як у макеті),
 /// менше — нижня панель NavigationBar.
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  const MainShell({
+    super.key,
+    required this.user,
+    required this.repository,
+    required this.analytics,
+  });
+
+  /// Авторизований користувач (оновлюється через AuthGate).
+  final AppUser user;
+  final AuthRepository repository;
+  final AnalyticsService analytics;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -33,16 +49,27 @@ class _MainShellState extends State<MainShell> {
   static const int _profileIndex = 4;
 
   static const List<_NavItem> _items = [
-    _NavItem(Icons.home, Icons.home, 'Головна'),
-    _NavItem(Icons.event, Icons.event, 'Події'),
-    _NavItem(Icons.people, Icons.people, 'Гості'),
-    _NavItem(Icons.task_alt, Icons.task_alt, 'Завдання'),
-    _NavItem(Icons.person, Icons.person, 'Профіль'),
+    _NavItem(Icons.home, Icons.home, 'Головна', 'home'),
+    _NavItem(Icons.event, Icons.event, 'Події', 'events'),
+    _NavItem(Icons.people, Icons.people, 'Гості', 'guests'),
+    _NavItem(Icons.task_alt, Icons.task_alt, 'Завдання', 'tasks'),
+    _NavItem(Icons.person, Icons.person, 'Профіль', 'profile'),
   ];
 
   int _selectedIndex = 0;
 
-  void _select(int index) => setState(() => _selectedIndex = index);
+  @override
+  void initState() {
+    super.initState();
+    widget.analytics.logScreenView(_items[_selectedIndex].screenName);
+  }
+
+  void _select(int index) {
+    if (index == _selectedIndex) return;
+    setState(() => _selectedIndex = index);
+    // Вкладки не є маршрутами Navigator, тому screen_view логуємо вручну.
+    widget.analytics.logScreenView(_items[index].screenName);
+  }
 
   void _createEvent() {
     showAppSnackBar(
@@ -51,23 +78,29 @@ class _MainShellState extends State<MainShell> {
     );
   }
 
-  /// Вихід: прибираємо всі екрани зі стеку й повертаємося на вхід.
-  void _logout() {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const AuthScreen()),
-      (route) => false,
-    );
+  /// Вихід: після signOut() AuthGate сам покаже екран входу.
+  Future<void> _logout() async {
+    try {
+      await widget.repository.signOut();
+    } on AuthFailure catch (failure) {
+      if (mounted) showAppSnackBar(context, failure.message);
+    }
   }
 
   List<Widget> get _pages => [
         HomeScreen(
+          user: widget.user,
           onOpenProfile: () => _select(_profileIndex),
           onCreateEvent: _createEvent,
         ),
         const PlaceholderScreen(title: 'Події', icon: Icons.event),
         const PlaceholderScreen(title: 'Гості', icon: Icons.people),
         const PlaceholderScreen(title: 'Завдання', icon: Icons.task_alt),
-        const ProfileScreen(),
+        ProfileScreen(
+          user: widget.user,
+          repository: widget.repository,
+          onLogout: _logout,
+        ),
       ];
 
   @override

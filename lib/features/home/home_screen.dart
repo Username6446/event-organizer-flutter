@@ -10,6 +10,7 @@ import '../../core/widgets/app_search_field.dart';
 import '../../core/widgets/event_card.dart';
 import '../../core/widgets/stat_card.dart';
 import '../../core/widgets/user_avatar.dart';
+import '../../models/app_user.dart';
 import '../../models/event_model.dart';
 
 /// Фільтри списку «Найближчі події».
@@ -24,7 +25,15 @@ enum _EventFilter {
 
 /// Головна сторінка — дашборд організатора (ФВ 5).
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.onOpenProfile, this.onCreateEvent});
+  const HomeScreen({
+    super.key,
+    required this.user,
+    this.onOpenProfile,
+    this.onCreateEvent,
+  });
+
+  /// Авторизований користувач (для аватара в шапці).
+  final AppUser user;
 
   /// Натискання на аватар у шапці відкриває профіль.
   final VoidCallback? onOpenProfile;
@@ -74,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _Header(
+                user: widget.user,
                 showSearchInline: constraints.maxWidth >= AppBreakpoints.medium,
                 onAvatarTap: widget.onOpenProfile,
               ),
@@ -135,8 +145,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
 /// Шапка: заголовок, сьогоднішня дата, пошук, сповіщення, аватар.
 class _Header extends StatelessWidget {
-  const _Header({required this.showSearchInline, this.onAvatarTap});
+  const _Header({
+    required this.user,
+    required this.showSearchInline,
+    this.onAvatarTap,
+  });
 
+  final AppUser user;
   final bool showSearchInline;
   final VoidCallback? onAvatarTap;
 
@@ -188,7 +203,13 @@ class _Header extends StatelessWidget {
             InkWell(
               customBorder: const CircleBorder(),
               onTap: onAvatarTap,
-              child: UserAvatar(initials: MockData.currentUser.initials),
+              child: Tooltip(
+                message: user.name,
+                child: UserAvatar(
+                  initials: user.initials,
+                  imageUrl: user.photoUrl,
+                ),
+              ),
             ),
           ],
         ),
