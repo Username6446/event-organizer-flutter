@@ -7,9 +7,10 @@ import '../utils/ua_date_format.dart';
 import 'avatar_stack.dart';
 import 'progress_bar.dart';
 
-/// Картка події для сітки «Найближчі події».
+/// Картка події для сітки «Найближчі події» та вкладки «Події».
 ///
-/// Шапка — градієнт (замість зображення), бейдж дати та категорія;
+/// Шапка — обкладинка за посиланням або градієнт, бейдж дати та категорія
+/// (для завершених і скасованих подій — ще й статус);
 /// нижче — назва, час, місце, гості та прогрес виконання завдань.
 class EventCard extends StatelessWidget {
   const EventCard({super.key, required this.event, this.onTap});
@@ -88,79 +89,103 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
+    final coverUrl = event.coverUrl;
+    final categoryLabel = [
+      event.category,
+      if (event.isDraft) 'чернетка',
+      if (event.status != EventStatus.planned) event.status.label.toLowerCase(),
+    ].join(' · ');
 
-    return Container(
+    return SizedBox(
       height: 112,
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: event.gradient,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
+        fit: StackFit.expand,
         children: [
-          // Бейдж з датою
-          Container(
-            width: 52,
-            padding: const EdgeInsets.symmetric(vertical: 6),
+          DecoratedBox(
             decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(AppRadius.s),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  UaDateFormat.day(event.date),
-                  style: textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                    height: 1.1,
-                  ),
-                ),
-                Text(
-                  UaDateFormat.monthShort(event.date),
-                  style: textTheme.labelSmall?.copyWith(
-                    color: AppColors.primary,
-                  ),
-                ),
-              ],
+              gradient: LinearGradient(
+                colors: event.gradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
             ),
           ),
-          const SizedBox(width: AppSpacing.s),
-          // Категорія
-          Expanded(
-            child: Align(
-              alignment: Alignment.topRight,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.s,
-                  vertical: AppSpacing.xs,
+          if (coverUrl != null)
+            Image.network(
+              coverUrl,
+              fit: BoxFit.cover,
+              webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
+              errorBuilder: (context, error, stackTrace) =>
+                  const SizedBox.shrink(),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            child: _buildBadges(context, categoryLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBadges(BuildContext context, String categoryLabel) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Бейдж з датою
+        Container(
+          width: 52,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.s),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                UaDateFormat.day(event.date),
+                style: textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                  height: 1.1,
                 ),
-                decoration: BoxDecoration(
-                  color: AppColors.surface.withValues(alpha: 0.92),
-                  borderRadius: BorderRadius.circular(AppRadius.s),
-                ),
-                child: Text(
-                  event.isDraft
-                      ? '${event.category} · чернетка'
-                      : event.category,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.labelSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
+              ),
+              Text(
+                UaDateFormat.monthShort(event.date),
+                style: textTheme.labelSmall?.copyWith(color: AppColors.primary),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: AppSpacing.s),
+        // Категорія
+        Expanded(
+          child: Align(
+            alignment: Alignment.topRight,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.s,
+                vertical: AppSpacing.xs,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.surface.withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(AppRadius.s),
+              ),
+              child: Text(
+                categoryLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
                 ),
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -172,9 +197,8 @@ class _MetaRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: AppColors.textSecondary,
-        );
+    final style = Theme.of(context).textTheme.bodySmall
+        ?.copyWith(color: AppColors.textSecondary);
 
     return Row(
       children: [

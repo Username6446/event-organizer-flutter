@@ -1,19 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../core/services/analytics_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../core/utils/validators.dart';
 import '../../core/widgets/app_button.dart';
 import '../../core/widgets/app_text_field.dart';
 import '../../core/widgets/password_field.dart';
 import '../../core/widgets/section_card.dart';
-import '../shell/main_shell.dart';
+import '../../core/widgets/status_badge.dart';
+import '../settings/data/settings_repository.dart';
+import 'bloc/login_bloc.dart';
+import 'data/auth_failure.dart';
+import 'data/auth_repository.dart';
 import 'forgot_password_screen.dart';
 import 'widgets/auth_layout.dart';
 
 /// Екран авторизації (ФВ 1, ФВ 2).
 ///
 /// Одна форма з двома режимами: «Вхід» і «Реєстрація».
-/// Перемикання відбувається через setState() без переходу на інший екран.
+/// Режим форми, позначки та помилки полів — ефемерний стан (setState).
+/// Сам запит до Firebase виконує [LoginBloc]: екран надсилає подію
+/// LoginSubmitted / RegisterSubmitted і перебудовується за станом BLoC.
+/// Після успішного входу AuthGate сам замінює цей екран на MainShell.
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
 
@@ -22,6 +32,8 @@ class AuthScreen extends StatefulWidget {
 }
 
 class _AuthScreenState extends State<AuthScreen> {
+  final _formKey = GlobalKey<FormState>();
+
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -29,7 +41,26 @@ class _AuthScreenState extends State<AuthScreen> {
 
   bool _isRegisterMode = false;
   bool _rememberMe = true;
-  bool _acceptTerms = false;
+
+  /// До першої спроби надсилання помилки не показуються,
+  /// після неї — оновлюються під час введення.
+  AutovalidateMode _autovalidateMode = AutovalidateMode.disabled;
+
+  // Помилки від Firebase: прив'язані до поля або загальні для форми.
+  String? _emailError;
+  String? _passwordError;
+  String? _formError;
+
+  AnalyticsService get _analytics => context.read<AnalyticsService>();
+
+  @override
+  void initState() {
+    super.initState();
+    _analytics.logScreenView('login');
+    // Email, збережений на пристрої після входу з «Запам'ятати мене».
+    _emailController.text =
+        context.read<SettingsRepository>().rememberedEmail ?? '';
+  }
 
   @override
   void dispose() {
@@ -41,25 +72,91 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _toggleMode() {
-    setState(() => _isRegisterMode = !_isRegisterMode);
+    setState(() {
+      _isRegisterMode = !_isRegisterMode;
+      _autovalidateMode = AutovalidateMode.disabled;
+      _clearServerErrors();
+    });
+    _analytics.logScreenView(_isRegisterMode ? 'register' : 'login');
   }
 
-  /// Бізнес-логіки ще немає: просто переходимо на головний екран.
-  /// pushReplacement — щоб кнопка «Назад» не повертала на форму входу.
+  void _clearServerErrors() {
+    _emailError = null;
+    _passwordError = null;
+    _formError = null;
+  }
+
+  /// Перевіряє форму й надсилає подію в [LoginBloc].
   void _submit() {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const MainShell()),
-    );
+    if (context.read<LoginBloc>().state is LoginLoading) return;
+    FocusScope.of(context).unfocus();
+
+    setState(() {
+      _clearServerErrors();
+      _autovalidateMode = AutovalidateMode.onUserInteraction;
+    });
+    if (!_formKey.currentState!.validate()) return;
+
+    final email = _emailController.text.trim();
+    final bloc = context.read<LoginBloc>();
+    if (_isRegisterMode) {
+      bloc.add(
+        RegisterSubmitted(
+          name: _nameController.text.trim(),
+          email: email,
+          password: _passwordController.text,
+        ),
+      );
+    } else {
+      bloc.add(
+        LoginSubmitted(
+          email: email,
+          password: _passwordController.text,
+          rememberMe: _rememberMe,
+        ),
+      );
+    }
+    // Навігація не потрібна: AuthGate отримає користувача з потоку.
+  }
+
+  /// Помилка з BLoC підсвічує відповідне поле або показується банером.
+  void _showFailure(AuthFailure failure) {
+    setState(() {
+      switch (failure.field) {
+        case AuthField.email:
+          _emailError = failure.message;
+        case AuthField.password || AuthField.currentPassword:
+          _passwordError = failure.message;
+        case null:
+          _formError = failure.message;
+      }
+    });
   }
 
   void _openForgotPassword() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
+      MaterialPageRoute(
+        settings: const RouteSettings(name: 'forgot_password'),
+        builder: (_) => ForgotPasswordScreen(
+          repository: context.read<AuthRepository>(),
+          initialEmail: _emailController.text.trim(),
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    return BlocConsumer<LoginBloc, LoginState>(
+      listenWhen: (previous, current) => current is LoginError,
+      listener: (context, state) {
+        if (state is LoginError) _showFailure(state.failure);
+      },
+      builder: (context, state) => _buildForm(context, state is LoginLoading),
+    );
+  }
+
+  Widget _buildForm(BuildContext context, bool isLoading) {
     final textTheme = Theme.of(context).textTheme;
     final isNarrow = MediaQuery.sizeOf(context).width < AppBreakpoints.compact;
 
@@ -72,112 +169,208 @@ class _AuthScreenState extends State<AuthScreen> {
         child: AnimatedSize(
           duration: const Duration(milliseconds: 200),
           alignment: Alignment.topCenter,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _isRegisterMode ? 'Створення акаунта' : 'Вхід до акаунта',
-                style: textTheme.headlineSmall?.copyWith(
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                _isRegisterMode
-                    ? 'Заповніть дані, щоб почати планувати свої події.'
-                    : 'Раді бачити вас знову! Увійдіть, щоб керувати своїми подіями.',
-                style: textTheme.bodyMedium?.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xl),
-
-              // Поле імені є лише в режимі реєстрації
-              if (_isRegisterMode) ...[
-                AppTextField(
-                  key: const ValueKey('name'),
-                  label: "Ім'я та прізвище",
-                  hint: 'Олена Коваль',
-                  prefixIcon: Icons.person,
-                  controller: _nameController,
-                  keyboardType: TextInputType.name,
-                ),
-                const SizedBox(height: AppSpacing.ml),
-              ],
-
-              AppTextField(
-                key: const ValueKey('email'),
-                label: 'Електронна пошта',
-                hint: 'name@example.com',
-                prefixIcon: Icons.mail,
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: AppSpacing.ml),
-              PasswordField(
-                key: const ValueKey('password'),
-                label: 'Пароль',
-                hint: _isRegisterMode ? 'Щонайменше 8 символів' : 'Введіть пароль',
-                controller: _passwordController,
-              ),
-
-              if (_isRegisterMode) ...[
-                const SizedBox(height: AppSpacing.ml),
-                PasswordField(
-                  key: const ValueKey('confirm'),
-                  label: 'Підтвердіть пароль',
-                  hint: 'Повторіть пароль',
-                  controller: _confirmController,
-                ),
-              ],
-
-              const SizedBox(height: AppSpacing.m),
-              if (_isRegisterMode)
-                _CheckboxRow(
-                  value: _acceptTerms,
-                  label: 'Погоджуюся з умовами використання',
-                  onChanged: (value) => setState(() => _acceptTerms = value),
-                )
-              else
-                Row(
-                  children: [
-                    Expanded(
-                      child: _CheckboxRow(
-                        value: _rememberMe,
-                        label: "Запам'ятати мене",
-                        onChanged: (value) =>
-                            setState(() => _rememberMe = value),
-                      ),
+          child: AutofillGroup(
+            child: Form(
+              key: _formKey,
+              autovalidateMode: _autovalidateMode,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _isRegisterMode ? 'Створення акаунта' : 'Вхід до акаунта',
+                    style: textTheme.headlineSmall?.copyWith(
+                      color: AppColors.textPrimary,
                     ),
-                    TextButton(
-                      onPressed: _openForgotPassword,
-                      child: const Text('Забули пароль?'),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    _isRegisterMode
+                        ? 'Заповніть дані, щоб почати планувати свої події.'
+                        : 'Раді бачити вас знову! Увійдіть, щоб керувати своїми подіями.',
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+
+                  if (_formError != null) ...[
+                    InfoBanner(
+                      message: _formError!,
+                      icon: Icons.error,
+                      backgroundColor: AppColors.errorContainer,
+                      iconColor: AppColors.error,
+                    ),
+                    const SizedBox(height: AppSpacing.ml),
+                  ],
+
+                  // Поле імені є лише в режимі реєстрації
+                  if (_isRegisterMode) ...[
+                    AppTextField(
+                      key: const ValueKey('name'),
+                      label: "Ім'я та прізвище",
+                      hint: 'Олена Коваль',
+                      prefixIcon: Icons.person,
+                      controller: _nameController,
+                      keyboardType: TextInputType.name,
+                      textInputAction: TextInputAction.next,
+                      autofillHints: const [AutofillHints.name],
+                      enabled: !isLoading,
+                      validator: Validators.name,
+                    ),
+                    const SizedBox(height: AppSpacing.ml),
+                  ],
+
+                  AppTextField(
+                    key: const ValueKey('email'),
+                    label: 'Електронна пошта',
+                    hint: 'name@example.com',
+                    prefixIcon: Icons.mail,
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const [AutofillHints.email],
+                    enabled: !isLoading,
+                    validator: Validators.email,
+                    errorText: _emailError,
+                    onChanged: (_) {
+                      if (_emailError != null) {
+                        setState(() => _emailError = null);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.ml),
+                  PasswordField(
+                    key: const ValueKey('password'),
+                    label: 'Пароль',
+                    hint: _isRegisterMode
+                        ? 'Щонайменше ${Validators.minPasswordLength} символів'
+                        : 'Введіть пароль',
+                    controller: _passwordController,
+                    textInputAction: _isRegisterMode
+                        ? TextInputAction.next
+                        : TextInputAction.done,
+                    autofillHints: [
+                      _isRegisterMode
+                          ? AutofillHints.newPassword
+                          : AutofillHints.password,
+                    ],
+                    enabled: !isLoading,
+                    validator: _isRegisterMode
+                        ? Validators.newPassword
+                        : Validators.loginPassword,
+                    errorText: _passwordError,
+                    onChanged: (_) {
+                      if (_passwordError != null) {
+                        setState(() => _passwordError = null);
+                      }
+                    },
+                    onFieldSubmitted: _isRegisterMode ? null : (_) => _submit(),
+                  ),
+
+                  if (_isRegisterMode) ...[
+                    const SizedBox(height: AppSpacing.ml),
+                    PasswordField(
+                      key: const ValueKey('confirm'),
+                      label: 'Підтвердіть пароль',
+                      hint: 'Повторіть пароль',
+                      controller: _confirmController,
+                      textInputAction: TextInputAction.done,
+                      enabled: !isLoading,
+                      validator: Validators.confirmPassword(
+                        () => _passwordController.text,
+                      ),
+                      onFieldSubmitted: (_) => _submit(),
                     ),
                   ],
-                ),
 
-              const SizedBox(height: AppSpacing.l),
-              AppButton(
-                label: _isRegisterMode ? 'Зареєструватися' : 'Увійти',
-                expanded: true,
-                onPressed: _submit,
+                  const SizedBox(height: AppSpacing.m),
+                  if (_isRegisterMode)
+                    _TermsField(
+                      key: const ValueKey('terms'),
+                      enabled: !isLoading,
+                    )
+                  else
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _CheckboxRow(
+                            value: _rememberMe,
+                            label: "Запам'ятати мене",
+                            onChanged: isLoading
+                                ? null
+                                : (value) =>
+                                      setState(() => _rememberMe = value),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: isLoading ? null : _openForgotPassword,
+                          child: const Text('Забули пароль?'),
+                        ),
+                      ],
+                    ),
+
+                  const SizedBox(height: AppSpacing.l),
+                  AppButton(
+                    label: _isRegisterMode ? 'Зареєструватися' : 'Увійти',
+                    expanded: true,
+                    isLoading: isLoading,
+                    onPressed: _submit,
+                  ),
+                  const SizedBox(height: AppSpacing.l),
+                  const _OrDivider(),
+                  const SizedBox(height: AppSpacing.l),
+                  AppButton(
+                    label: _isRegisterMode
+                        ? 'Вже є акаунт? Увійти'
+                        : 'Створити акаунт',
+                    icon: _isRegisterMode ? Icons.login : Icons.person_add,
+                    variant: AppButtonVariant.outlined,
+                    expanded: true,
+                    onPressed: isLoading ? null : _toggleMode,
+                  ),
+                ],
               ),
-              const SizedBox(height: AppSpacing.l),
-              const _OrDivider(),
-              const SizedBox(height: AppSpacing.l),
-              AppButton(
-                label: _isRegisterMode
-                    ? 'Вже є акаунт? Увійти'
-                    : 'Створити акаунт',
-                icon: _isRegisterMode ? Icons.login : Icons.person_add,
-                variant: AppButtonVariant.outlined,
-                expanded: true,
-                onPressed: _toggleMode,
-              ),
-            ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Згода з умовами використання як поле форми:
+/// без позначки FormState.validate() поверне false.
+class _TermsField extends StatelessWidget {
+  const _TermsField({super.key, required this.enabled});
+
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return FormField<bool>(
+      initialValue: false,
+      validator: (value) => value == true
+          ? null
+          : 'Щоб продовжити, погодьтеся з умовами використання',
+      builder: (state) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _CheckboxRow(
+            value: state.value ?? false,
+            label: 'Погоджуюся з умовами використання',
+            onChanged: enabled ? state.didChange : null,
+          ),
+          if (state.hasError)
+            Padding(
+              padding: const EdgeInsets.only(left: AppSpacing.sm),
+              child: Text(
+                state.errorText!,
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: AppColors.error),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -193,26 +386,31 @@ class _CheckboxRow extends StatelessWidget {
 
   final bool value;
   final String label;
-  final ValueChanged<bool> onChanged;
+
+  /// null — чекбокс неактивний.
+  final ValueChanged<bool>? onChanged;
 
   @override
   Widget build(BuildContext context) {
+    final onChanged = this.onChanged;
+
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadius.s),
-      onTap: () => onChanged(!value),
+      onTap: onChanged == null ? null : () => onChanged(!value),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Checkbox(
             value: value,
-            onChanged: (checked) => onChanged(checked ?? false),
+            onChanged: onChanged == null
+                ? null
+                : (checked) => onChanged(checked ?? false),
           ),
           Flexible(
             child: Text(
               label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textPrimary,
-                  ),
+              style: Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: AppColors.textPrimary),
             ),
           ),
         ],
@@ -234,9 +432,8 @@ class _OrDivider extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.m),
           child: Text(
             'або',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.textSecondary,
-                ),
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: AppColors.textSecondary),
           ),
         ),
         const Expanded(child: Divider()),

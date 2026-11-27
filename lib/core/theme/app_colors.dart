@@ -58,10 +58,38 @@ abstract final class AppColors {
   ];
 
   // Градієнти шапок карток подій
-  static const List<Color> gradientPurple = [Color(0xFF7B5EA7), Color(0xFFB97AA3)];
-  static const List<Color> gradientTeal = [Color(0xFF0B6B6B), Color(0xFF4DB6A8)];
-  static const List<Color> gradientOrange = [Color(0xFFA0501A), Color(0xFFE89A48)];
-  static const List<Color> gradientBlue = [Color(0xFF3F51A5), Color(0xFF7D8FE0)];
-  static const List<Color> gradientGreen = [Color(0xFF3E6E1F), Color(0xFF8BC15A)];
-  static const List<Color> gradientMagenta = [Color(0xFF6A1B6A), Color(0xFFD35D7A)];
+  static const List<Color> gradientPurple = [
+    Color(0xFF7B5EA7),
+    Color(0xFFB97AA3),
+  ];
+  static const List<Color> gradientTeal = [
+    Color(0xFF0B6B6B),
+    Color(0xFF4DB6A8),
+  ];
+  static const List<Color> gradientOrange = [
+    Color(0xFFA0501A),
+    Color(0xFFE89A48),
+  ];
+  static const List<Color> gradientBlue = [
+    Color(0xFF3F51A5),
+    Color(0xFF7D8FE0),
+  ];
+  static const List<Color> gradientGreen = [
+    Color(0xFF3E6E1F),
+    Color(0xFF8BC15A),
+  ];
+  static const List<Color> gradientMagenta = [
+    Color(0xFF6A1B6A),
+    Color(0xFFD35D7A),
+  ];
+
+  /// Набір градієнтів для вибору обкладинки у формі події.
+  static const List<List<Color>> eventGradients = [
+    gradientPurple,
+    gradientTeal,
+    gradientOrange,
+    gradientBlue,
+    gradientGreen,
+    gradientMagenta,
+  ];
 }

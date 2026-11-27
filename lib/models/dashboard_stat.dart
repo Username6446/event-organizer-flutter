@@ -5,17 +5,17 @@ class DashboardStat {
   const DashboardStat({
     required this.label,
     required this.value,
-    required this.delta,
     required this.icon,
     required this.iconBackground,
     required this.iconColor,
+    this.delta,
   });
 
   final String label;
   final String value;
 
-  /// Зміна за тиждень, наприклад «+3».
-  final String delta;
+  /// Додатковий підпис біля числа, наприклад «5 підтв.»; null — без нього.
+  final String? delta;
 
   final IconData icon;
   final Color iconBackground;

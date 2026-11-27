@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 
-/// Кругла аватарка з ініціалами користувача або гостя.
+/// Кругла аватарка: фото за посиланням або ініціали користувача чи гостя.
 class UserAvatar extends StatelessWidget {
   const UserAvatar({
     super.key,
     required this.initials,
+    this.imageUrl,
     this.size = 40,
     this.backgroundColor = AppColors.primaryContainer,
     this.foregroundColor = AppColors.onPrimaryContainer,
@@ -15,6 +16,11 @@ class UserAvatar extends StatelessWidget {
   });
 
   final String initials;
+
+  /// HTTPS-посилання на фото. Якщо його немає або зображення не
+  /// завантажилось — показуються ініціали.
+  final String? imageUrl;
+
   final double size;
   final Color backgroundColor;
   final Color foregroundColor;
@@ -31,6 +37,36 @@ class UserAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final url = imageUrl;
+    final initialsAvatar = _buildInitials();
+    if (url == null || url.isEmpty) return initialsAvatar;
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppColors.surfaceContainerHigh,
+        border: borderColor == null
+            ? null
+            : Border.all(color: borderColor!, width: 2),
+      ),
+      child: ClipOval(
+        child: Image.network(
+          url,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          // Якщо сервер не дозволяє CORS, Flutter Web покаже
+          // зображення через звичайний <img>.
+          webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
+          errorBuilder: (context, error, stackTrace) => initialsAvatar,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInitials() {
     return Container(
       width: size,
       height: size,

@@ -36,8 +36,10 @@ class AuthPromoPanel extends StatelessWidget {
             padding: EdgeInsets.all(outer),
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                minHeight: (constraints.maxHeight - outer * 2)
-                    .clamp(0.0, double.infinity),
+                minHeight: (constraints.maxHeight - outer * 2).clamp(
+                  0.0,
+                  double.infinity,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -65,7 +67,9 @@ class AuthPromoPanel extends StatelessWidget {
                             color: AppColors.onPrimary.withValues(alpha: 0.85),
                           ),
                         ),
-                        SizedBox(height: compact ? AppSpacing.l : AppSpacing.xl),
+                        SizedBox(
+                          height: compact ? AppSpacing.l : AppSpacing.xl,
+                        ),
                         _FeatureTile(
                           compact: compact,
                           icon: Icons.people,
@@ -180,9 +184,7 @@ class _NextEventCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.onPrimary.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(AppRadius.l),
-        border: Border.all(
-          color: AppColors.onPrimary.withValues(alpha: 0.25),
-        ),
+        border: Border.all(color: AppColors.onPrimary.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -220,7 +222,7 @@ class _NextEventCard extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  '${event.guestsCount} гостей підтвердили участь',
+                  '${event.confirmedCount} гостей підтвердили участь',
                   style: textTheme.bodySmall?.copyWith(color: muted),
                 ),
               ),

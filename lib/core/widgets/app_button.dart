@@ -25,10 +25,16 @@ class AppButton extends StatelessWidget {
     this.variant = AppButtonVariant.filled,
     this.expanded = false,
     this.foregroundColor,
+    this.isLoading = false,
   });
 
   final String label;
+
+  /// null — кнопка неактивна.
   final VoidCallback? onPressed;
+
+  /// Показує індикатор замість іконки та блокує повторне натискання.
+  final bool isLoading;
   final IconData? icon;
   final AppButtonVariant variant;
 
@@ -50,7 +56,16 @@ class AppButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final iconWidget = icon == null ? null : Icon(icon, size: 18);
+    final Widget? iconWidget = isLoading
+        ? const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : icon == null
+            ? null
+            : Icon(icon, size: 18);
+    final onPressed = isLoading ? null : this.onPressed;
     final text = Text(label);
 
     final Widget button = switch (variant) {

@@ -8,6 +8,9 @@ import '../theme/app_spacing.dart';
 /// Використовується на екранах входу, реєстрації, відновлення пароля
 /// та в профілі. Параметри передаються через конструктор, тому один
 /// віджет покриває всі варіанти: email, телефон, код, заблоковане поле.
+///
+/// Усередині — [TextFormField], тож поле працює з [Form]: локальна
+/// перевірка через [validator], серверна помилка — через [errorText].
 class AppTextField extends StatelessWidget {
   const AppTextField({
     super.key,
@@ -20,8 +23,14 @@ class AppTextField extends StatelessWidget {
     this.keyboardType,
     this.obscureText = false,
     this.locked = false,
+    this.enabled = true,
     this.maxLength,
     this.onChanged,
+    this.validator,
+    this.errorText,
+    this.textInputAction,
+    this.onFieldSubmitted,
+    this.autofillHints,
   });
 
   /// Підпис над полем («Електронна пошта»).
@@ -45,8 +54,24 @@ class AppTextField extends StatelessWidget {
   /// Поле лише для читання з іконкою замка (email у профілі).
   final bool locked;
 
+  /// false — поле недоступне (наприклад, під час надсилання форми).
+  final bool enabled;
+
   final int? maxLength;
   final ValueChanged<String>? onChanged;
+
+  /// Локальна валідація (викликається з FormState.validate()).
+  final FormFieldValidator<String>? validator;
+
+  /// Помилка від сервера («Акаунт із таким email уже існує»).
+  /// Показується незалежно від [validator].
+  final String? errorText;
+
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onFieldSubmitted;
+
+  /// Підказки для автозаповнення браузера (email, пароль).
+  final Iterable<String>? autofillHints;
 
   @override
   Widget build(BuildContext context) {
@@ -73,17 +98,25 @@ class AppTextField extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.s),
         ],
-        TextField(
+        TextFormField(
           controller: controller,
           keyboardType: keyboardType,
           obscureText: obscureText,
           readOnly: locked,
+          enabled: enabled,
           maxLength: maxLength,
           onChanged: onChanged,
+          validator: validator,
+          forceErrorText: errorText,
+          textInputAction: textInputAction,
+          onFieldSubmitted: onFieldSubmitted,
+          autofillHints: autofillHints,
           style: textTheme.bodyLarge?.copyWith(color: AppColors.textPrimary),
           decoration: InputDecoration(
             hintText: hint,
             helperText: helperText,
+            helperMaxLines: 2,
+            errorMaxLines: 2,
             filled: true,
             fillColor:
                 locked ? AppColors.surfaceContainerHigh : AppColors.background,
@@ -101,10 +134,13 @@ class AppTextField extends StatelessWidget {
             enabledBorder: border(
               locked ? AppColors.outlineVariant : AppColors.outline,
             ),
+            disabledBorder: border(AppColors.outlineVariant),
             focusedBorder: border(
               locked ? AppColors.outlineVariant : AppColors.primary,
               width: locked ? 1 : 2,
             ),
+            errorBorder: border(AppColors.error),
+            focusedErrorBorder: border(AppColors.error, width: 2),
           ),
         ),
       ],

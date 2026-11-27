@@ -60,6 +60,13 @@ abstract final class UaDateFormat {
       '${_weekdaysShort[date.weekday - 1]}, ${date.day} '
       '${_monthsGenitive[date.month - 1]}';
 
+  /// «18 жовтня»
+  static String dayMonth(DateTime date) =>
+      '${date.day} ${_monthsGenitive[date.month - 1]}';
+
+  /// «18 жовтня 2026»
+  static String dayMonthYear(DateTime date) => '${dayMonth(date)} ${date.year}';
+
   /// «Сб, 18:00»
   static String weekdayTime(DateTime date) =>
       '${_weekdaysShort[date.weekday - 1]}, ${time(date)}';
