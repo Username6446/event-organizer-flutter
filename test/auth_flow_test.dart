@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:event_organizer/app.dart';
 import 'package:event_organizer/core/services/analytics_service.dart';
 import 'package:event_organizer/features/auth/data/auth_failure.dart';
+import 'package:event_organizer/features/events/data/in_memory_event_repository.dart';
+import 'package:event_organizer/features/settings/data/settings_repository.dart';
 import 'package:event_organizer/models/app_user.dart';
 
 import 'fakes/fake_auth_repository.dart';
@@ -19,20 +22,28 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
+    // Порожнє сховище SharedPreferences для кожного тесту.
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
     final repository = FakeAuthRepository(initialUser: user);
-    await tester.pumpWidget(EventOrganizerApp(
-      authRepository: repository,
-      analytics: AnalyticsService.disabled(),
-    ));
+    await tester.pumpWidget(
+      EventOrganizerApp(
+        authRepository: repository,
+        eventRepository: InMemoryEventRepository(latency: Duration.zero),
+        settingsRepository: SettingsRepository(prefs),
+        analytics: AnalyticsService.disabled(),
+      ),
+    );
     await tester.pumpAndSettle();
     return repository;
   }
 
   /// Текстове поле всередині AppTextField / PasswordField з ключем [key].
   Finder field(String key) => find.descendant(
-        of: find.byKey(ValueKey(key)),
-        matching: find.byType(TextField),
-      );
+    of: find.byKey(ValueKey(key)),
+    matching: find.byType(TextField),
+  );
 
   Future<void> tapText(WidgetTester tester, String text) async {
     await tester.ensureVisible(find.text(text));
@@ -41,8 +52,9 @@ void main() {
   }
 
   group('Вхід', () {
-    testWidgets('порожня форма показує помилки й не надсилає запит',
-        (tester) async {
+    testWidgets('порожня форма показує помилки й не надсилає запит', (
+      tester,
+    ) async {
       final repository = await pumpApp(tester);
 
       await tapText(tester, 'Увійти');
@@ -92,9 +104,29 @@ void main() {
     });
   });
 
+  testWidgets("«Запам'ятати мене» зберігає email на пристрої", (tester) async {
+    await pumpApp(tester);
+
+    await tester.enterText(field('email'), 'olena@gmail.com');
+    await tester.enterText(field('password'), FakeAuthRepository.validPassword);
+    await tapText(tester, 'Увійти');
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getString(SettingsRepository.rememberedEmailKey),
+      'olena@gmail.com',
+    );
+
+    // Після виходу форма входу підставляє збережений email.
+    await tapText(tester, 'Вийти');
+    expect(find.text('Вхід до акаунта'), findsOneWidget);
+    expect(find.text('olena@gmail.com'), findsOneWidget);
+  });
+
   group('Реєстрація', () {
-    testWidgets('паролі мають збігатися, а умови — бути прийнятими',
-        (tester) async {
+    testWidgets('паролі мають збігатися, а умови — бути прийнятими', (
+      tester,
+    ) async {
       final repository = await pumpApp(tester);
       await tapText(tester, 'Створити акаунт');
 
@@ -184,8 +216,9 @@ void main() {
       expect(find.text('Зміни збережено'), findsOneWidget);
     });
 
-    testWidgets('неправильний поточний пароль показується біля поля',
-        (tester) async {
+    testWidgets('неправильний поточний пароль показується біля поля', (
+      tester,
+    ) async {
       final repository = await pumpApp(tester, user: user);
       repository.nextFailure = const AuthFailure(
         'Поточний пароль неправильний',

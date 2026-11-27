@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/config/app_config.dart';
-import '../../core/data/mock_data.dart';
 import '../../core/services/error_reporter.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
@@ -16,25 +16,22 @@ import '../../core/widgets/status_badge.dart';
 import '../../core/widgets/user_avatar.dart';
 import '../../models/app_user.dart';
 import '../auth/data/auth_failure.dart';
-import '../auth/data/auth_repository.dart';
+import '../events/bloc/events_bloc.dart';
+import 'bloc/profile_cubit.dart';
+import 'widgets/app_settings_card.dart';
 import 'widgets/avatar_picker_dialog.dart';
 import 'widgets/password_strength_indicator.dart';
 
 /// Екран профілю користувача (ФВ 4).
 ///
-/// Ім'я та фото зберігаються у Firebase Authentication (displayName,
-/// photoURL), пароль змінюється з повторною автентифікацією.
-/// Усі зміни застосовуються кнопкою «Зберегти зміни».
+/// Дані профілю завантажує та зберігає [ProfileCubit]: ім'я та фото —
+/// у Firebase Authentication (displayName, photoURL), пароль змінюється
+/// з повторною автентифікацією. Значення полів форми — ефемерний стан
+/// екрана; зміни застосовуються кнопкою «Зберегти зміни».
+/// Налаштування застосунку зберігаються на пристрої одразу ([AppSettingsCard]).
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({
-    super.key,
-    required this.user,
-    required this.repository,
-    required this.onLogout,
-  });
+  const ProfileScreen({super.key, required this.onLogout});
 
-  final AppUser user;
-  final AuthRepository repository;
   final VoidCallback onLogout;
 
   @override
@@ -44,26 +41,32 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  late final _firstNameController =
-      TextEditingController(text: widget.user.firstName);
-  late final _lastNameController =
-      TextEditingController(text: widget.user.lastName);
-  late final _emailController = TextEditingController(text: widget.user.email);
+  late final _firstNameController = TextEditingController(
+    text: _savedUser.firstName,
+  );
+  late final _lastNameController = TextEditingController(
+    text: _savedUser.lastName,
+  );
+  late final _emailController = TextEditingController(text: _savedUser.email);
   final _currentPasswordController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
   /// Вибране, але ще не збережене фото (null — без фото).
-  late String? _photoUrl = widget.user.photoUrl;
+  late String? _photoUrl = _savedUser.photoUrl;
 
   String _newPassword = '';
-  bool _isSaving = false;
   AutovalidateMode _autovalidateMode = AutovalidateMode.disabled;
 
   // Помилки від Firebase.
   String? _currentPasswordError;
   String? _newPasswordError;
   String? _formError;
+
+  /// Збережений профіль (стан ProfileCubit).
+  AppUser get _savedUser => context.read<ProfileCubit>().state.user;
+
+  bool get _isSaving => context.read<ProfileCubit>().state.isSaving;
 
   @override
   void dispose() {
@@ -86,8 +89,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _confirmPasswordController.text.isNotEmpty;
 
   bool get _isProfileChanged =>
-      _displayName != (widget.user.displayName ?? '').trim() ||
-      _photoUrl != widget.user.photoUrl;
+      _displayName != (_savedUser.displayName ?? '').trim() ||
+      _photoUrl != _savedUser.photoUrl;
 
   void _clearServerErrors() {
     _currentPasswordError = null;
@@ -102,7 +105,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _newPassword = '';
   }
 
-  Future<void> _save() async {
+  void _save() {
     if (_isSaving) return;
     FocusScope.of(context).unfocus();
 
@@ -119,34 +122,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    setState(() => _isSaving = true);
-    try {
-      if (profileChanged) {
-        await widget.repository.updateProfile(
-          displayName: _displayName,
-          photoUrl: _photoUrl,
+    // Результат (успіх чи помилку) обробляє BlocListener у build().
+    context.read<ProfileCubit>().saveChanges(
+      updateProfile: profileChanged,
+      displayName: _displayName,
+      photoUrl: _photoUrl,
+      currentPassword: passwordRequested
+          ? _currentPasswordController.text
+          : null,
+      newPassword: passwordRequested ? _newPasswordController.text : null,
+    );
+  }
+
+  /// Реакція на зміну стану ProfileCubit: одноразові дії (SnackBar,
+  /// очищення полів), тому BlocListener, а не BlocBuilder.
+  void _onProfileState(BuildContext context, ProfileState state) {
+    switch (state.status) {
+      case ProfileStatus.saved:
+        setState(() {
+          if (state.passwordChanged) _clearPasswordFields();
+          _autovalidateMode = AutovalidateMode.disabled;
+        });
+        showAppSnackBar(
+          context,
+          state.passwordChanged
+              ? 'Зміни збережено, пароль оновлено'
+              : 'Зміни збережено',
         );
-      }
-      if (passwordRequested) {
-        await widget.repository.changePassword(
-          currentPassword: _currentPasswordController.text,
-          newPassword: _newPasswordController.text,
-        );
-      }
-      if (!mounted) return;
-      setState(() {
-        if (passwordRequested) _clearPasswordFields();
-        _autovalidateMode = AutovalidateMode.disabled;
-      });
-      showAppSnackBar(
-        context,
-        passwordRequested ? 'Зміни збережено, пароль оновлено' : 'Зміни збережено',
-      );
-    } on AuthFailure catch (failure) {
-      if (!mounted) return;
-      _handleFailure(failure);
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
+      case ProfileStatus.failure:
+        final failure = state.failure;
+        if (failure != null) _handleFailure(failure);
+      case ProfileStatus.ready || ProfileStatus.saving:
+        break;
     }
   }
 
@@ -177,10 +184,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // reset() спершу: він скидає помилки валідації, а вже потім
     // контролерам повертаються значення з профілю.
     _formKey.currentState?.reset();
+    final user = _savedUser;
     setState(() {
-      _firstNameController.text = widget.user.firstName;
-      _lastNameController.text = widget.user.lastName;
-      _photoUrl = widget.user.photoUrl;
+      _firstNameController.text = user.firstName;
+      _lastNameController.text = user.lastName;
+      _photoUrl = user.photoUrl;
       _clearPasswordFields();
       _clearServerErrors();
       _autovalidateMode = AutovalidateMode.disabled;
@@ -191,7 +199,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _pickPhoto() async {
     final url = await showAvatarPickerDialog(
       context,
-      initials: widget.user.initials,
+      initials: _savedUser.initials,
       currentUrl: _photoUrl,
     );
     if (url != null && mounted) setState(() => _photoUrl = url);
@@ -224,6 +232,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return BlocConsumer<ProfileCubit, ProfileState>(
+      listenWhen: (previous, current) => previous.status != current.status,
+      listener: _onProfileState,
+      builder: (context, state) => _buildContent(context, state.user),
+    );
+  }
+
+  Widget _buildContent(BuildContext context, AppUser user) {
+    // Статистика профілю — зі спільного стану подій (EventsBloc).
+    final events = context.watch<EventsBloc>().state.events;
+    final guestsCount = events.fold<int>(0, (sum, e) => sum + e.guestsCount);
+    final tasksCount = events.fold<int>(0, (sum, e) => sum + e.tasksTotal);
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < AppBreakpoints.compact;
@@ -231,9 +252,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final horizontal = isNarrow ? AppSpacing.m : AppSpacing.xl;
 
         final summary = _ProfileSummaryCard(
-          user: widget.user,
+          user: user,
+          eventsCount: events.length,
+          guestsCount: guestsCount,
+          tasksCount: tasksCount,
           photoUrl: _photoUrl,
-          hasUnsavedPhoto: _photoUrl != widget.user.photoUrl,
+          hasUnsavedPhoto: _photoUrl != user.photoUrl,
           enabled: !_isSaving,
           onPickPhoto: _pickPhoto,
           onRemovePhoto: _removePhoto,
@@ -257,6 +281,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildPersonalData(),
               const SizedBox(height: AppSpacing.l),
               _buildChangePassword(),
+              const SizedBox(height: AppSpacing.l),
+              const AppSettingsCard(),
               const SizedBox(height: AppSpacing.l),
               Align(
                 alignment: Alignment.centerRight,
@@ -358,7 +384,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildChangePassword() {
     return SectionCard(
       title: 'Зміна пароля',
-      subtitle: 'Заповніть, лише якщо хочете змінити пароль. '
+      subtitle:
+          'Заповніть, лише якщо хочете змінити пароль. '
           'Щонайменше ${Validators.minPasswordLength} символів, літери та цифри',
       child: Column(
         children: [
@@ -452,6 +479,9 @@ class _ProfileHeader extends StatelessWidget {
 class _ProfileSummaryCard extends StatelessWidget {
   const _ProfileSummaryCard({
     required this.user,
+    required this.eventsCount,
+    required this.guestsCount,
+    required this.tasksCount,
     required this.photoUrl,
     required this.hasUnsavedPhoto,
     required this.enabled,
@@ -461,16 +491,15 @@ class _ProfileSummaryCard extends StatelessWidget {
   });
 
   final AppUser user;
+  final int eventsCount;
+  final int guestsCount;
+  final int tasksCount;
   final String? photoUrl;
   final bool hasUnsavedPhoto;
   final bool enabled;
   final VoidCallback onPickPhoto;
   final VoidCallback onRemovePhoto;
   final VoidCallback onLogout;
-
-  /// Статистика поки що з MockData: реальні дані з'являться разом
-  /// із Cloud Firestore (заглушка дозволена методичкою).
-  static const _stats = MockData.currentUser;
 
   @override
   Widget build(BuildContext context) {
@@ -543,9 +572,9 @@ class _ProfileSummaryCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _StatColumn(value: '${_stats.eventsCount}', label: 'Подій'),
-              _StatColumn(value: '${_stats.guestsCount}', label: 'Гостей'),
-              _StatColumn(value: '${_stats.tasksCount}', label: 'Завдань'),
+              _StatColumn(value: '$eventsCount', label: 'Подій'),
+              _StatColumn(value: '$guestsCount', label: 'Гостей'),
+              _StatColumn(value: '$tasksCount', label: 'Завдань'),
             ],
           ),
           const SizedBox(height: AppSpacing.m),
@@ -658,9 +687,7 @@ class _StatColumn extends StatelessWidget {
         ),
         Text(
           label,
-          style: textTheme.bodySmall?.copyWith(
-            color: AppColors.textSecondary,
-          ),
+          style: textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
         ),
       ],
     );

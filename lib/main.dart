@@ -8,6 +8,8 @@ import 'app.dart';
 import 'core/config/app_config.dart';
 import 'core/services/analytics_service.dart';
 import 'features/auth/data/firebase_auth_repository.dart';
+import 'features/events/data/in_memory_event_repository.dart';
+import 'features/settings/data/settings_repository.dart';
 import 'firebase_options.dart';
 
 /// Точка входу в програму.
@@ -22,27 +24,28 @@ Future<void> main() async {
     return;
   }
 
-  await SentryFlutter.init(
-    (options) {
-      options.dsn = AppConfig.sentryDsn;
-      options.environment = kReleaseMode ? 'production' : 'development';
-      options.sendDefaultPii = false;
-    },
-    appRunner: _runApp,
-  );
+  await SentryFlutter.init((options) {
+    options.dsn = AppConfig.sentryDsn;
+    options.environment = kReleaseMode ? 'production' : 'development';
+    options.sendDefaultPii = false;
+  }, appRunner: _runApp);
 }
 
 Future<void> _runApp() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   final analytics = AnalyticsService(FirebaseAnalytics.instance);
   final authRepository = FirebaseAuthRepository(analytics: analytics);
+  // Локальне сховище налаштувань (SharedPreferences → localStorage на Web).
+  final settingsRepository = await SettingsRepository.create();
+  // Поки що дані подій зберігаються в пам'яті (Firestore — у лабораторній №6).
+  final eventRepository = InMemoryEventRepository();
 
   final Widget app = EventOrganizerApp(
     authRepository: authRepository,
+    eventRepository: eventRepository,
+    settingsRepository: settingsRepository,
     analytics: analytics,
   );
 

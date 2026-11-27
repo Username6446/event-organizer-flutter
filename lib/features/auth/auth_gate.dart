@@ -1,60 +1,46 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../core/services/analytics_service.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/widgets/app_logo.dart';
-import '../../models/app_user.dart';
+import '../settings/data/settings_repository.dart';
 import '../shell/main_shell.dart';
 import 'auth_screen.dart';
+import 'bloc/auth_session_cubit.dart';
+import 'bloc/login_bloc.dart';
 import 'data/auth_repository.dart';
 
-/// Вибирає стартовий екран за станом автентифікації.
+/// Вибирає стартовий екран за станом [AuthSessionCubit].
 ///
-/// Підписується на [AuthRepository.userChanges]: поки Firebase відновлює
-/// сесію — показує завантаження, далі — вхід або головну оболонку.
-/// Вхід і вихід не потребують ручної навігації: екран змінюється сам.
-class AuthGate extends StatefulWidget {
-  const AuthGate({
-    super.key,
-    required this.repository,
-    required this.analytics,
-  });
-
-  final AuthRepository repository;
-  final AnalyticsService analytics;
-
-  @override
-  State<AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends State<AuthGate> {
-  // Потік створюється один раз, щоб StreamBuilder не перепідписувався
-  // під час кожного build().
-  late final Stream<AppUser?> _userStream = widget.repository.userChanges();
+/// Поки Firebase відновлює сесію — показує завантаження, далі — вхід або
+/// головну оболонку. Вхід і вихід не потребують ручної навігації:
+/// BlocBuilder перебудовує екран, щойно змінюється стан сесії.
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<AppUser?>(
-      stream: _userStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+    return BlocBuilder<AuthSessionCubit, AuthSessionState>(
+      builder: (context, state) {
+        final user = state.user;
+        if (state.status == AuthSessionStatus.unknown) {
           return const _SplashScreen();
         }
-
-        final user = snapshot.data;
         if (user == null) {
-          return AuthScreen(
-            repository: widget.repository,
-            analytics: widget.analytics,
+          // Форма входу отримує власний LoginBloc (RepositoryProvider
+          // над MaterialApp передає йому залежності).
+          return BlocProvider(
+            create: (context) => LoginBloc(
+              context.read<AuthRepository>(),
+              context.read<SettingsRepository>(),
+            ),
+            child: const AuthScreen(),
           );
         }
-
         return MainShell(
           // Новий користувач — новий стан оболонки (вкладка, форми).
           key: ValueKey(user.uid),
           user: user,
-          repository: widget.repository,
-          analytics: widget.analytics,
         );
       },
     );

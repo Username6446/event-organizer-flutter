@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/services/analytics_service.dart';
 import '../../core/theme/app_colors.dart';
@@ -9,6 +10,8 @@ import '../../core/widgets/app_text_field.dart';
 import '../../core/widgets/password_field.dart';
 import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
+import '../settings/data/settings_repository.dart';
+import 'bloc/login_bloc.dart';
 import 'data/auth_failure.dart';
 import 'data/auth_repository.dart';
 import 'forgot_password_screen.dart';
@@ -17,17 +20,12 @@ import 'widgets/auth_layout.dart';
 /// Екран авторизації (ФВ 1, ФВ 2).
 ///
 /// Одна форма з двома режимами: «Вхід» і «Реєстрація».
-/// Перемикання відбувається через setState() без переходу на інший екран.
+/// Режим форми, позначки та помилки полів — ефемерний стан (setState).
+/// Сам запит до Firebase виконує [LoginBloc]: екран надсилає подію
+/// LoginSubmitted / RegisterSubmitted і перебудовується за станом BLoC.
 /// Після успішного входу AuthGate сам замінює цей екран на MainShell.
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({
-    super.key,
-    required this.repository,
-    required this.analytics,
-  });
-
-  final AuthRepository repository;
-  final AnalyticsService analytics;
+  const AuthScreen({super.key});
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -43,7 +41,6 @@ class _AuthScreenState extends State<AuthScreen> {
 
   bool _isRegisterMode = false;
   bool _rememberMe = true;
-  bool _isLoading = false;
 
   /// До першої спроби надсилання помилки не показуються,
   /// після неї — оновлюються під час введення.
@@ -54,10 +51,15 @@ class _AuthScreenState extends State<AuthScreen> {
   String? _passwordError;
   String? _formError;
 
+  AnalyticsService get _analytics => context.read<AnalyticsService>();
+
   @override
   void initState() {
     super.initState();
-    widget.analytics.logScreenView('login');
+    _analytics.logScreenView('login');
+    // Email, збережений на пристрої після входу з «Запам'ятати мене».
+    _emailController.text =
+        context.read<SettingsRepository>().rememberedEmail ?? '';
   }
 
   @override
@@ -75,7 +77,7 @@ class _AuthScreenState extends State<AuthScreen> {
       _autovalidateMode = AutovalidateMode.disabled;
       _clearServerErrors();
     });
-    widget.analytics.logScreenView(_isRegisterMode ? 'register' : 'login');
+    _analytics.logScreenView(_isRegisterMode ? 'register' : 'login');
   }
 
   void _clearServerErrors() {
@@ -84,8 +86,9 @@ class _AuthScreenState extends State<AuthScreen> {
     _formError = null;
   }
 
-  Future<void> _submit() async {
-    if (_isLoading) return;
+  /// Перевіряє форму й надсилає подію в [LoginBloc].
+  void _submit() {
+    if (context.read<LoginBloc>().state is LoginLoading) return;
     FocusScope.of(context).unfocus();
 
     setState(() {
@@ -94,39 +97,40 @@ class _AuthScreenState extends State<AuthScreen> {
     });
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
-    try {
-      final email = _emailController.text.trim();
-      if (_isRegisterMode) {
-        await widget.repository.signUp(
+    final email = _emailController.text.trim();
+    final bloc = context.read<LoginBloc>();
+    if (_isRegisterMode) {
+      bloc.add(
+        RegisterSubmitted(
           name: _nameController.text.trim(),
           email: email,
           password: _passwordController.text,
-        );
-      } else {
-        await widget.repository.signIn(
+        ),
+      );
+    } else {
+      bloc.add(
+        LoginSubmitted(
           email: email,
           password: _passwordController.text,
           rememberMe: _rememberMe,
-        );
-      }
-      // Навігація не потрібна: AuthGate отримає користувача з потоку.
-    } on AuthFailure catch (failure) {
-      if (!mounted) return;
-      setState(() {
-        switch (failure.field) {
-          case AuthField.email:
-            _emailError = failure.message;
-          case AuthField.password || AuthField.currentPassword:
-            _passwordError = failure.message;
-          case null:
-            _formError = failure.message;
-        }
-      });
-    } finally {
-      // Після успішного входу екран уже може бути знищений.
-      if (mounted) setState(() => _isLoading = false);
+        ),
+      );
     }
+    // Навігація не потрібна: AuthGate отримає користувача з потоку.
+  }
+
+  /// Помилка з BLoC підсвічує відповідне поле або показується банером.
+  void _showFailure(AuthFailure failure) {
+    setState(() {
+      switch (failure.field) {
+        case AuthField.email:
+          _emailError = failure.message;
+        case AuthField.password || AuthField.currentPassword:
+          _passwordError = failure.message;
+        case null:
+          _formError = failure.message;
+      }
+    });
   }
 
   void _openForgotPassword() {
@@ -134,7 +138,7 @@ class _AuthScreenState extends State<AuthScreen> {
       MaterialPageRoute(
         settings: const RouteSettings(name: 'forgot_password'),
         builder: (_) => ForgotPasswordScreen(
-          repository: widget.repository,
+          repository: context.read<AuthRepository>(),
           initialEmail: _emailController.text.trim(),
         ),
       ),
@@ -143,6 +147,16 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return BlocConsumer<LoginBloc, LoginState>(
+      listenWhen: (previous, current) => current is LoginError,
+      listener: (context, state) {
+        if (state is LoginError) _showFailure(state.failure);
+      },
+      builder: (context, state) => _buildForm(context, state is LoginLoading),
+    );
+  }
+
+  Widget _buildForm(BuildContext context, bool isLoading) {
     final textTheme = Theme.of(context).textTheme;
     final isNarrow = MediaQuery.sizeOf(context).width < AppBreakpoints.compact;
 
@@ -201,7 +215,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       keyboardType: TextInputType.name,
                       textInputAction: TextInputAction.next,
                       autofillHints: const [AutofillHints.name],
-                      enabled: !_isLoading,
+                      enabled: !isLoading,
                       validator: Validators.name,
                     ),
                     const SizedBox(height: AppSpacing.ml),
@@ -216,7 +230,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
                     autofillHints: const [AutofillHints.email],
-                    enabled: !_isLoading,
+                    enabled: !isLoading,
                     validator: Validators.email,
                     errorText: _emailError,
                     onChanged: (_) {
@@ -241,7 +255,7 @@ class _AuthScreenState extends State<AuthScreen> {
                           ? AutofillHints.newPassword
                           : AutofillHints.password,
                     ],
-                    enabled: !_isLoading,
+                    enabled: !isLoading,
                     validator: _isRegisterMode
                         ? Validators.newPassword
                         : Validators.loginPassword,
@@ -262,7 +276,7 @@ class _AuthScreenState extends State<AuthScreen> {
                       hint: 'Повторіть пароль',
                       controller: _confirmController,
                       textInputAction: TextInputAction.done,
-                      enabled: !_isLoading,
+                      enabled: !isLoading,
                       validator: Validators.confirmPassword(
                         () => _passwordController.text,
                       ),
@@ -274,7 +288,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   if (_isRegisterMode)
                     _TermsField(
                       key: const ValueKey('terms'),
-                      enabled: !_isLoading,
+                      enabled: !isLoading,
                     )
                   else
                     Row(
@@ -283,14 +297,14 @@ class _AuthScreenState extends State<AuthScreen> {
                           child: _CheckboxRow(
                             value: _rememberMe,
                             label: "Запам'ятати мене",
-                            onChanged: _isLoading
+                            onChanged: isLoading
                                 ? null
                                 : (value) =>
-                                    setState(() => _rememberMe = value),
+                                      setState(() => _rememberMe = value),
                           ),
                         ),
                         TextButton(
-                          onPressed: _isLoading ? null : _openForgotPassword,
+                          onPressed: isLoading ? null : _openForgotPassword,
                           child: const Text('Забули пароль?'),
                         ),
                       ],
@@ -300,7 +314,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   AppButton(
                     label: _isRegisterMode ? 'Зареєструватися' : 'Увійти',
                     expanded: true,
-                    isLoading: _isLoading,
+                    isLoading: isLoading,
                     onPressed: _submit,
                   ),
                   const SizedBox(height: AppSpacing.l),
@@ -313,7 +327,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     icon: _isRegisterMode ? Icons.login : Icons.person_add,
                     variant: AppButtonVariant.outlined,
                     expanded: true,
-                    onPressed: _isLoading ? null : _toggleMode,
+                    onPressed: isLoading ? null : _toggleMode,
                   ),
                 ],
               ),
@@ -352,9 +366,8 @@ class _TermsField extends StatelessWidget {
               padding: const EdgeInsets.only(left: AppSpacing.sm),
               child: Text(
                 state.errorText!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.error,
-                    ),
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: AppColors.error),
               ),
             ),
         ],
@@ -396,9 +409,8 @@ class _CheckboxRow extends StatelessWidget {
           Flexible(
             child: Text(
               label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textPrimary,
-                  ),
+              style: Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: AppColors.textPrimary),
             ),
           ),
         ],
@@ -420,9 +432,8 @@ class _OrDivider extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.m),
           child: Text(
             'або',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.textSecondary,
-                ),
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: AppColors.textSecondary),
           ),
         ),
         const Expanded(child: Divider()),
